@@ -5,7 +5,7 @@ Python code on AWS Lambda that fetches stock price data from various sources and
 Python 3.11 x86_64
 
 ## Usage Limitations
-Since this function fetches data from various public (but enterprise) sources, only private use is expected and certain morality is required.
+Since this function fetches data from various public (but enterprise) sources, only non-frequent private use is expected.
 
 ## Data Source
 Contact me for each url prefix for these sources.
