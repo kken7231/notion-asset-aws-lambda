@@ -1,0 +1,8 @@
+venv
+*.zip
+aiohttp_layer
+
+*.tfstate*
+*.json
+*.hcl
+.terraform
