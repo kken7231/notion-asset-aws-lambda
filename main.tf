@@ -12,10 +12,10 @@ provider "aws" {
 
 locals {
   parsed_data = jsondecode(file("${path.module}/config.json"))
-  env_vars = {
+  env_vars = merge({
     for key, value in lookup(local.parsed_data, "env_vars", {}) :
     key => sensitive(value)
-  }
+  }, {"ASSETS_DATA": replace(file("${path.module}/assets.json"), "\\s+", "")})
   layers = concat([aws_lambda_layer_version.aiohttp_layer.arn], lookup(local.parsed_data, "layers", []))
 }
 
@@ -88,5 +88,16 @@ resource "aws_lambda_function_url" "lambda_function_url" {
 
   provisioner "local-exec" {
     command = "echo Function URL is ${self.function_url}"
+  }
+}
+
+resource "aws_dynamodb_table" "assets_checker_table" {
+  name           = "assets_checker_table"
+  billing_mode   = "PAY_PER_REQUEST" 
+  hash_key       = "name"
+
+  attribute {
+    name = "name"
+    type = "S"
   }
 }

@@ -1,0 +1,17 @@
+{
+  "assets": [
+    {
+      "name": "ゴールド",
+      "purchased": 300000,
+      "lot": 30.0,
+      "type": "gold"
+    },
+    {
+      "name": "ビットコイン",
+      "purchased": 4000000,
+      "lot": 1.0,
+      "code": "BTC_JPY",
+      "type": "crypto"
+    }
+  ]
+}

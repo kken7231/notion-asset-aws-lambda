@@ -6,7 +6,7 @@ import asyncio
 import aiohttp
 import hmac
 import hashlib
-
+import urls
 
 def authorize(x_line_signature, body_str:str):
     channel_secret = os.getenv('LINE_CHANNEL_SECRET')
@@ -14,63 +14,25 @@ def authorize(x_line_signature, body_str:str):
     signature = base64.b64encode(hash).decode('utf-8')
     return x_line_signature == signature
 
-async def getRequest(session: aiohttp.ClientSession, url: str):
-    return await session.get(url)
-
-async def postRequest(session: aiohttp.ClientSession, url: str):
-    return await session.post(url)
-
 def getAllProperties():
-    # with open("./assets.json", mode="r", encoding="utf-8") as f:
-    #     data = json.load(f)
     assets_data = os.getenv('ASSETS_DATA')
     assert assets_data
     data = json.loads(assets_data)
     assert 'assets' in data
     return data
 
-async def fetchBitFlyer(session: aiohttp.ClientSession, code: str):
-    raw_resp: aiohttp.ClientResponse = await getRequest(session, os.environ['PREFIX_CRYPTO']+code)
-    if raw_resp.status != 200:
-        return None
-    else:
-        resp = await raw_resp.json()
-        return float(resp['ltp'])
-
-async def fetchMinkabuFund(session: aiohttp.ClientSession, code: str):
-    raw_resp: aiohttp.ClientResponse = await getRequest(session, os.environ['PREFIX_INDEX']+code)
-    if raw_resp.status != 200:
-        return None
-    else:
-        resp = await raw_resp.json()
-        return float(resp['fund_data'][0]['fund_price'])
-
-async def fetchMinkabuStock(session: aiohttp.ClientSession, code: str):
-    raw_resp: aiohttp.ClientResponse = await getRequest(session, os.environ['PREFIX_STOCK']+code)
-    if raw_resp.status != 200:
-        return None
-    else:
-        resp = await raw_resp.json()
-        return float(resp['items'][0]['price'])
-
-async def fetchSbiGold(session: aiohttp.ClientSession):
-    raw_resp: aiohttp.ClientResponse = await postRequest(session, os.environ['PREFIX_GOLD'])
-    if raw_resp.status != 200:
-        return None
-    else:
-        resp = json.loads(json.loads(await raw_resp.text())['data'])
-        return float(resp['FGNOK']['BID']['px'])
-
 async def processAsset(session: aiohttp.ClientSession, asset: dict[str, str]):
     price = None
-    if asset['datasrc'] == 'BITFLYER':
-        price = await fetchBitFlyer(session, asset['code'])
-    elif asset['datasrc'] == 'MINKABU_FUND':
-        price = await fetchMinkabuFund(session, asset['code'])
-    elif asset['datasrc'] == 'MINKABU_STOCK':
-        price = await fetchMinkabuStock(session, asset['code'])
-    elif asset['datasrc'] == 'SBI_GOLD':
-        price = await fetchSbiGold(session)
+    if not 'type' in asset:
+        price = None
+    elif asset['type'] == 'crypto':
+        price = await urls.fetchCrypto(session, asset['code'])
+    elif asset['type'] == 'index':
+        price = await urls.fetchIndex(session, asset['code'])
+    elif asset['type'] == 'stock':
+        price = await urls.fetchStock(session, asset['code'])
+    elif asset['type'] == 'gold':
+        price = await urls.fetchGold(session)
     return asset['name'], price
 
 async def process(line_user_id=None):
@@ -95,23 +57,48 @@ async def process(line_user_id=None):
         prices = {name:price for name, price in await asyncio.gather(*coroutines)} 
         
         sum_purchased = 0
-        sum_jika = 0
-        sum_soneki = 0
-        asset_price = []
-        for asset in props['assets']:
+        sum_curprice = 0
+        sum_gain = 0
+        has_error = False
+        line_content = []
+        def get_font_color(is_green: bool):
+            return "#02D46A" if is_green else "#F63428"
+        
+        for asset in list(sorted(props['assets'], key=lambda x: x["datasrc"])):
             assert asset['name'] in prices
             if not prices[asset['name']]:
+                # no data
                 current_price = None
                 gain = 0
+                has_error = True
             else:
                 current_price = float(asset["lot"])*prices[asset['name']]
                 gain = current_price - asset["purchased"]
 
             sum_purchased += asset["purchased"]
-            sum_jika += current_price
-            sum_soneki += gain
+            sum_curprice += current_price
+            sum_gain += gain
             if line_user_id:
-                asset_price.append((asset, current_price))
+                line_content.append(
+                    line_flex_message_vbox([
+                        line_flex_message_text(asset['name'], opt={"weight": "bold", "wrap": True}),
+                        line_flex_message_bbox([
+                            line_flex_message_text(
+                                f"{int(current_price):,}円" if current_price else "-", 
+                                color="#666666", 
+                                opt={"align": "end", "flex": 5}),
+                            line_flex_message_text(
+                                f"{int(current_price-asset['purchased']):+,}円" if current_price else "-", 
+                                color=get_font_color(current_price and current_price > asset['purchased']), 
+                                opt={"align": "end", "flex": 6}),
+                            line_flex_message_text(
+                                f"{(current_price-asset['purchased'])/asset['purchased']*100:+,.1f}%" if current_price else "-", 
+                                color=get_font_color(current_price and current_price > asset['purchased']),
+                                opt={"align": "end", "flex": 4})
+                        ]),
+                    ], opt={"margin": "8px"})
+                )
+                
 
         if line_user_id:
             channel_access_token = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
@@ -119,46 +106,50 @@ async def process(line_user_id=None):
                 'content-type': 'application/json',
                 'Authorization': f"Bearer {channel_access_token}"
             }
-            sorted_asset_price = list(sorted(asset_price, key=lambda x: x[0]["datasrc"]))
-            sorted_asset_price.append(({"name": "総計", "purchased": sum_purchased}, sum_jika))
+            line_content.append(
+                line_flex_message_vbox([
+                    {"type": "separator","margin": "8px"},
+                    line_flex_message_bbox([
+                        line_flex_message_text(
+                            f"{int(sum_curprice):,}円" if current_price else "-", 
+                            color="#000000", 
+                            opt={"weight": "bold", "align": "end", "flex": 5}),
+                        line_flex_message_text(
+                            f"{int(sum_curprice-sum_purchased):+,}円" if not has_error else "-", 
+                            color=get_font_color(not has_error and sum_curprice > sum_purchased), 
+                            opt={"weight": "bold", "align": "end", "flex": 6}),
+                        line_flex_message_text(
+                            f"{(sum_curprice-sum_purchased)/sum_purchased*100:+,.1f}%" if not has_error else "-", 
+                            color=get_font_color(not has_error and sum_curprice > sum_purchased),
+                            opt={"weight": "bold", "align": "end", "flex": 4})
+                    ], opt={"margin": "8px"}),
+                ])
+            )
             payload = {
                 "to": line_user_id,
-                "messages": [line_flex_message(sorted_asset_price)]
+                "messages": [line_flex_message(line_content)]
             }
             await session.post('https://api.line.me/v2/bot/message/push', headers=headers, data=json.dumps(payload))
             return None
         else:
-            return (sum_jika, sum_soneki)
+            return (sum_curprice, sum_gain)
     
 def line_flex_message_vbox(contents, opt=None):
-    base = {
-        "type": "box",
-        "layout": "vertical",
-        "contents": contents
-    }
+    base = {"type": "box", "layout": "vertical", "contents": contents}
     base.update(opt or {})
     return base
 
 def line_flex_message_bbox(contents, opt=None):
-    base = {
-        "type": "box",
-        "layout": "baseline",
-        "contents": contents
-    }
+    base = {"type": "box", "layout": "baseline", "contents": contents}
     base.update(opt or {})
     return base
 
 def line_flex_message_text(text:str, color:str="#000000", size:str="sm", opt=None):
-    base = {
-        "type": "text",
-        "text": text,
-        "color": color,
-        "size": size,
-    }
+    base = {"type": "text", "text": text, "color": color, "size": size}
     base.update(opt or {})
     return base
 
-def line_flex_message(asset_price: list[tuple[dict, float]]):
+def line_flex_message(line_content: list[dict[str]]):
     return {
         "type": "flex",
         "altText": "This is a Flex Message",
@@ -170,18 +161,8 @@ def line_flex_message(asset_price: list[tuple[dict, float]]):
                             line_flex_message_text("損益", color="#aaaaaa",size="sm", opt={"align": "end", "flex": 6}),
                             line_flex_message_text("損益率", color="#aaaaaa",size="sm", opt={"align": "end", "flex": 4}),
                         ]),
-                        line_flex_message_vbox([
-                            line_flex_message_vbox([
-                                line_flex_message_text(asset['name'], size="sm", opt={"weight": "bold", "wrap": True}),
-                                line_flex_message_bbox([
-                                    line_flex_message_text(f"{int(current_price):,}円" if current_price else "エラー", color="#666666", size="sm", opt={"align": "end", "flex": 5}),
-                                    line_flex_message_text(f"{int(current_price-asset['purchased']):+,}円" if current_price else "エラー", color="#02D46A" if current_price and current_price > asset['purchased'] else "#F63428", size="sm", opt={"align": "end", "flex": 6}),
-                                    line_flex_message_text(f"{(current_price-asset['purchased'])/asset['purchased']*100:+,.2f}%" if current_price else "エラー", color="#02D46A" if current_price and current_price > asset['purchased'] else "#F63428", size="sm", opt={"align": "end", "flex": 4})
-                                ]),
-                            ], opt={"margin": "0px"})
-                            for asset, current_price in asset_price ], opt={"margin": "0px"})
-                        ], opt={"spacing": "16px"}
-                    )
+                        line_flex_message_vbox(line_content)
+                    ])
         }
     }
 

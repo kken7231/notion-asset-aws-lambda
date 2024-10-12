@@ -1,0 +1,14 @@
+{
+  "env_vars": {
+    "LINE_CHANNEL_ACCESS_TOKEN": "",
+    "LINE_CHANNEL_SECRET": "",
+    "LINE_USER_ID": "",
+    "EVENT_PWD": "",
+    "EVENT_USER": "",
+    "PREFIX_CRYPTO": "https://example.com",
+    "PREFIX_GOLD": "https://example.com",
+    "PREFIX_INDEX": "https://example.com",
+    "PREFIX_STOCK": "https://example.com",
+    "PREFIX": "https://bitflyer.com/api/trade/computechartanalysis?minute_interval=1440&number_of_intervals=365&start=1697119164951&product_code=BTC_JPY"
+  }
+}

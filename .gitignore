@@ -3,6 +3,9 @@ venv
 aiohttp_layer
 
 *.tfstate*
-*.json
+config.json
+assets.json
 *.hcl
 .terraform
+
+src/urls.py
